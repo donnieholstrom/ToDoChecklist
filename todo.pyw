@@ -447,9 +447,6 @@ def drop(L, it):  # remove this exact item (two tasks can have the same text)
     for k, x in enumerate(L):
         if x is it: del L[k]; return
 
-def preview(note):  # first line of a note, with "…" if there's more
-    lines = note.strip().splitlines(); return lines[0] + ("  …" if len(lines) > 1 else "") if lines else ""
-
 def tool(parent, img, cmd):  # small image button that brightens on hover
     b = tk.Label(parent, image=img(DIM), cursor="hand2"); b.pack(side="left", padx=3)
     b.bind("<Button-1>", lambda e: root.after_idle(cmd))
@@ -473,9 +470,10 @@ def row(kind, it, color, click, delete, i=None, label=None):
     l.bind("<Enter>", lambda e: l.config(image=icon(kind, ACC)), add="+"); l.bind("<Leave>", lambda e: l.config(image=icon(kind, color)), add="+")
     nl = None
     if noting: note_editor(f, it)
-    elif note:  # one dim line under the title
-        nl = tk.Label(f, fg=mix(DIM, BG, .15), font=("Segoe UI", 9), anchor="w", width=1, padx=0, pady=0, cursor="hand2")
-        nl.pack(side="top", fill="x", padx=(31, 8), pady=(0, 6)); fit(nl, preview(note)); hover(nl, ACC, nl["fg"])
+    elif note:  # the whole note in dim text under the title, wrapped to the row's width
+        nl = tk.Label(f, text=note, fg=mix(DIM, BG, .15), font=("Segoe UI", 9), anchor="w", justify="left", width=1, padx=0, pady=0, cursor="hand2")
+        nl.pack(side="top", fill="x", padx=(31, 8), pady=(0, 6)); hover(nl, ACC, nl["fg"])
+        nl.bind("<Configure>", lambda e: e.width > 1 and nl.config(wraplength=e.width), add="+")
         nl.bind("<Button-1>", lambda e: root.after_idle(click) if i is None else root.after_idle(start, "note", i))
     rounded(f, BG, BG)
     if not noting: hover_bg(f, HOV_MAIN, BG)
