@@ -149,8 +149,10 @@ def hover_bg(f, on, off):  # hover highlight (and ✕ / tools reveal) that survi
 
 def newbtn(parent, text, cmd):  # slim "+ New …" button; clicking it opens a name box in its place
     b = tk.Frame(parent, cursor="hand2")
-    l = tk.Label(b, text=text, fg=DIM, font=("Segoe UI", 10), anchor="w", padx=TX, pady=4); l.pack(fill="x")
-    plus = tk.Label(b, image=icon("plus", DIM, S=11, gap=0), bd=0); plus.place(x=GUT, rely=.5, anchor="center")  # in the gutter
+    font = ("Segoe UI", 10); off = caps_mid(font)  # Segoe's capitals sit below the middle of its line box
+    l = tk.Label(b, text=text, fg=DIM, font=font, anchor="w", padx=TX, pady=0); l.pack(fill="x", pady=(4 - off, 4 + off))
+    plus = tk.Label(b, image=icon("plus", DIM, S=11, gap=0), bd=0)  # in the gutter, centered to the pixel on the box
+    b.bind("<Configure>", lambda e: plus.place(x=GUT - 11 // 2, y=(e.height - 11) // 2, anchor="nw"), add="+")
     rounded(b, HI, SIDE); hover_bg(b, FOCUS, HI)
     for w in (b, l, plus): w.bind("<Button-1>", lambda e: root.after_idle(cmd))
     return b
