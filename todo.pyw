@@ -68,6 +68,7 @@ def paint(f, color):  # recolor a frame, its children and its corners
     f.config(bg=color)
     for c in f.winfo_children():
         if c not in getattr(f, "corners", ()) and not getattr(c, "keep", False): c.config(bg=color)
+    if getattr(f, "xb", None): f.xb.config(fg=color)
     for c, im in zip(getattr(f, "corners", ()), corners(color, getattr(f, "outer", color))): c.config(image=im); c.lift()
 
 def png(w, h, rgba):  # build a Tk image from RGBA pixels via a tiny in-memory PNG (real alpha = smooth on any bg)
@@ -116,39 +117,24 @@ def caps_mid(font):  # vertical offset from a label's center to the middle of it
 def within(w, parent):  # is widget w the parent or inside it? (".!frame2" must not count as inside ".!frame")
     w, parent = str(w or ""), str(parent); return w == parent or w.startswith(parent + ".")
 
-def hover_bg(f, on, off):  # hover highlight (and pencil reveal) that survives moving onto the row's children
+def hover_bg(f, on, off):  # hover highlight (and ✕ / tools reveal) that survives moving onto the row's children
     inside = lambda: within(root.winfo_containing(*root.winfo_pointerxy()), f)
     def hot(h):
         if on != off: paint(f, on if h else off)
-        p = getattr(f, "pencil", None)
+        xb = getattr(f, "xb", None)
+        if xb: xb.config(fg=X if h else f["bg"])  # hidden = drawn in the row's own color, so nothing shifts
+        p = getattr(f, "tools", None)
         if p and h:  # float it just left of the row's right-side buttons, over the end of the name
             pad = lambda w: (lambda v: sum(v) if isinstance(v, tuple) else int(v))(w.pack_info()["padx"])
             right = sum(w.winfo_reqwidth() + pad(w) for w in f.pack_slaves() if w.pack_info()["side"] == "right")
             for c in p.winfo_children(): c.config(bg=f["bg"])
-            if hasattr(f, "pencil_x"): p.place(x=f.pencil_x(), rely=.5, anchor="w")  # custom spot (title)
-            elif hasattr(f, "title_lbl"):  # task rows: centered on the title line, not the whole (maybe two-line) row
+            if hasattr(f, "title_lbl"):  # task rows: centered on the title line, not the whole (maybe two-line) row
                 p.place(relx=1, x=-right - 4, y=6 + f.title_lbl.winfo_reqheight() // 2, anchor="e")  # 6 = title's top padding
             else: p.place(relx=1, x=-right - 4, rely=.5, anchor="e")
             p.lift()
         elif p: p.place_forget()
     f.bind("<Enter>", lambda e: hot(True))
     f.bind("<Leave>", lambda e: root.after(1, lambda: f.winfo_exists() and not drag.get("g") and hot(inside())))
-
-def pen_img(color, N=11):  # tiny pixel-art pencil at 45°, tip bottom-left; unset pixels stay transparent
-    im = tk.PhotoImage(width=N, height=N)
-    for y in range(N):
-        for x in range(N):
-            s, t = x + y - N + 1, x - y  # s = across the pencil, t = along it
-            body = abs(s) <= 1 or (abs(s) == 2 and (s + t) % 2 == 0)
-            if t < 6 - N: body = abs(s) <= (t + N - 1) // 2 and (s + t) % 2 == 0  # tapered tip
-            if body and t not in (N - 6, N - 5): im.put(color, (x, y))  # gap marks the eraser end
-    return im
-PEN = pen_img(DIM), pen_img(ACC)
-
-def pencil(f, bg, cmd):  # edit button, only shown while its row is hovered (takes no space otherwise)
-    p = f.pencil = tk.Label(f, image=PEN[0], bg=bg, padx=8, cursor="hand2")
-    p.bind("<Button-1>", lambda e: root.after_idle(cmd))
-    p.bind("<Enter>", lambda e: p.config(image=PEN[1])); p.bind("<Leave>", lambda e: p.config(image=PEN[0]))
 
 def newbtn(parent, text, cmd):  # slim "+ New …" button; clicking it opens a name box in its place
     b = tk.Frame(parent, cursor="hand2")
@@ -171,10 +157,15 @@ def fit(l, text=None):  # cut text to the label's width with "…"; refits whene
 def hover(w, on, off):
     w.bind("<Enter>", lambda e: w.config(fg=on), add="+"); w.bind("<Leave>", lambda e: w.config(fg=off), add="+")
 
-def xbtn(parent, bg, cmd, text="✕", on=RED):
-    x = tk.Label(parent, text=text, bg=bg, fg=X, font=F1, padx=8, cursor="hand2"); x.pack(side="right", padx=(0, 4))
+def xbtn(parent, bg, cmd, text="✕", on=RED):  # delete button, only visible while its row is hovered
+    x = parent.xb = tk.Label(parent, text=text, bg=bg, fg=bg, font=F1, padx=8, cursor="hand2"); x.pack(side="right", padx=(0, 4))
     x.bind("<Button-1>", lambda e: root.after_idle(cmd)); hover(x, on, X)
     return x
+
+def on_text(e):  # did this click land on a label's text, rather than the empty space beside it?
+    w = e.widget
+    if not isinstance(w, tk.Label) or not w["text"]: return False
+    pad = int(str(w["padx"])); return pad - 2 <= e.x <= pad + int(w.tk.call("font", "measure", w["font"], w["text"])) + 2
 
 side = tk.Frame(root, bg=SIDE, width=d.get("side", 200)); side.pack(side="left", fill="y"); side.pack_propagate(False)
 # draggable divider between the columns; sidebar stays 150-400px and leaves the main column 320px
@@ -199,12 +190,8 @@ crumb = tk.Label(crumbf, bg=BG, font=F3, anchor="w", width=1, padx=0); crumb.pac
 crumbdot = tk.Label(crumbf, bg=BG, bd=0); crumbdot.place(x=4, rely=.5, y=caps_mid(F3), anchor="center")
 titlebar = tk.Frame(main, bg=BG); titlebar.pack(fill="x")
 title = tk.Label(titlebar, bg=BG, fg=FG, font=F2, anchor="w", width=1); title.pack(fill="x")
-# pencil that appears right after the title text when hovered, to rename the open list
-tpen = tk.Label(titlebar, image=PEN[0], bg=BG, padx=6, cursor="hand2")
-tpen.bind("<Button-1>", lambda e: root.after_idle(start, "title", sel))
-tpen.bind("<Enter>", lambda e: tpen.config(image=PEN[1])); tpen.bind("<Leave>", lambda e: tpen.config(image=PEN[0]))
-titlebar.pencil_x = lambda: min(titlebar.winfo_width() - 26, int(root.tk.call("font", "measure", F2, title["text"])) + 8)
-hover_bg(titlebar, BG, BG)
+title.bind("<Button-1>", lambda e: sel and sel != DONE and on_text(e) and root.after_idle(start, "title", sel))  # click to rename
+title.bind("<Motion>", lambda e: title.config(cursor="xterm" if sel and sel != DONE and on_text(e) else ""))
 rowsbox = tk.Frame(main, bg=BG); rowsbox.pack(fill="both", expand=True, pady=(12, 0))
 rows = tk.Frame(rowsbox, bg=BG); rows.pack(fill="both", expand=True)
 
@@ -224,7 +211,7 @@ def pick(c):
 # --- drag & drop: row = the frame being moved (has .key), handles = widgets you grab it by
 def dnd(row, handles, text, click, commit):
     for w in handles:
-        w.bind("<ButtonPress-1>", lambda e: drag.update(row=row, y=e.y_root, g=None, text=text))
+        w.bind("<ButtonPress-1>", lambda e: drag.update(row=row, y=e.y_root, g=None, text=text, w=e.widget, hit=on_text(e)))
         # only react to a press that started on this same row: buttons (✕, ≡, ✎) re-render on press, so the
         # matching release can land on a freshly drawn row that was never pressed
         w.bind("<B1-Motion>", lambda e: drag.get("row") is row and motion(e))
@@ -250,8 +237,8 @@ def motion(e):
     else: r.pack(after=rs[-1])
 
 def release(click, commit):
-    g = drag.get("g"); drag.clear()
-    if not g: return click()
+    g, w, hit = drag.get("g"), drag.get("w"), drag.get("hit"); drag.clear()
+    if not g: return click(w, hit)
     g.destroy(); commit(); save(); render()
 
 def move_tasks():
@@ -369,19 +356,19 @@ def build_side():
         else:
             h = tk.Frame(cats, bg=SIDE); h.pack(fill="x", padx=8); h.key = ("g", g)
             xbtn(h, SIDE, lambda g=g: delgroup(g))
-            pencil(h, SIDE, lambda g=g: start("rename", g)); hover_bg(h, SIDE, SIDE)
+            hover_bg(h, SIDE, SIDE)
             dot = tk.Label(h, image=dot_img(col or X, SIDE), bg=SIDE, bd=0, padx=4, pady=4, cursor="hand2")
             dot.bind("<Button-1>", lambda e, g=g, w=dot: root.after_idle(palette, g, w))
             l = tk.Label(h, bg=SIDE, fg=mix(col, FG, .25) if col else DIM, font=F3, padx=TX, pady=6, anchor="w", width=1)
             l.pack(side="left", fill="x", expand=True); fit(l, g.upper())
             dot.place(x=GUT, rely=.5, y=caps_mid(F3), anchor="center"); dot.lift()
-            l.bind("<Double-Button-1>", lambda e, g=g: root.after_idle(start, "rename", g))
+            l.bind("<Button-1>", lambda e, g=g: on_text(e) and root.after_idle(start, "rename", g))
+            l.bind("<Motion>", lambda e, l=l: l.config(cursor="xterm" if on_text(e) else ""))
         for c in names:
             if editing == ("rename_list", c): inline(c, ("l", c)); continue
             if confirm == ("list", c): confirm_row(c, ("l", c)); continue
             f = tk.Frame(cats, cursor="hand2"); f.pack(fill="x", padx=8); f.key = ("l", c)
             xbtn(f, SIDE, lambda c=c: delcat(c))
-            pencil(f, SIDE, lambda c=c: start("rename_list", c))
             n = tk.Label(f, fg=DIM, font=F1); n.pack(side="right")
             t = tk.Label(f, fg=FG, font=F1, padx=TX, pady=6, anchor="w", width=1)
             t.pack(side="left", fill="x", expand=True); fit(t, c)
@@ -389,7 +376,9 @@ def build_side():
             if col:  # small color tick at the left edge; muted unless selected
                 bar = tk.Frame(f, width=3, height=14, bg=mix(SIDE, col, .5)); bar.keep = True
                 bar.place(x=GUT, rely=.5, anchor="center")
-            dnd(f, (f, n, t), c, lambda c=c: c != sel and pick(c), move_lists)  # clicking the open list does nothing
+            # click another list to open it; click the open list's name to rename it
+            dnd(f, (f, n, t), c, lambda w, hit, c=c, t=t: pick(c) if c != sel else w is t and hit and start("rename_list", c), move_lists)
+            t.bind("<Motion>", lambda e, c=c, t=t: t.config(cursor="xterm" if c == sel and on_text(e) else "hand2"))
             side_rows[c] = (f, n, bar, col)
         if editing == ("new_list", g): inline("")
         else: newbtn(cats, "New list", lambda g=g: start("new_list", g)).pack(fill="x", padx=8, pady=(2, 4))
@@ -407,11 +396,9 @@ def build_main():
     paint(donebtn, HI if sel == DONE else SIDE)
     hover_bg(donebtn, HI if sel == DONE else HOV_SIDE, HI if sel == DONE else SIDE)
     for w in titlebar.winfo_children():
-        if w not in (title, tpen): w.destroy()
+        if w is not title: w.destroy()
     show(title, editing != ("title", sel), fill="x")
     if editing == ("title", sel): inline(sel, None, titlebar, F2)
-    titlebar.pencil = tpen if sel and sel != DONE and not editing else None
-    tpen.place_forget()
     grp = next((k for k, v in d["groups"].items() if sel in v), None) if sel != DONE else None
     show(crumbf, bool(grp), fill="x", before=titlebar)
     if sel == DONE:
@@ -458,30 +445,35 @@ def row(kind, it, color, click, delete, i=None, label=None):
     noting = i is not None and editing == ("note", i)
     f = tk.Frame(rows); f.pack(fill="x"); f.key = i
     xbtn(f, BG, lambda: (delete(), save(), render())).pack_configure(anchor="n", pady=6)  # stays on the title line
-    tools = f.pencil = tk.Frame(f)  # shown on hover
+    tools = f.tools = tk.Frame(f)  # shown on hover
     if i is not None:
         tool(tools, lambda c: icon("note", c, gap=0), lambda: start("note", i))
-        tool(tools, lambda c: PEN[c == ACC], lambda: start("rename_task", i))
     else:  # Completed rows
         b = tk.Label(tools, text="↩ Return to list", fg=DIM, font=("Segoe UI", 9), padx=5, cursor="hand2"); b.pack()
         b.bind("<Button-1>", lambda e: root.after_idle(click)); hover(b, ACC, DIM)
-    l = f.title_lbl = tk.Label(f, text=text, image=icon(kind, color), compound="left", fg=color, font=F1, anchor="w", cursor="hand2", padx=0, pady=0)
-    l.pack(side="top", fill="x", padx=(12, 0), pady=(6, 1 if note or noting else 6)); hover(l, ACC, color)  # padx=0: Tk also puts it between icon and text
-    l.bind("<Enter>", lambda e: l.config(image=icon(kind, ACC)), add="+"); l.bind("<Leave>", lambda e: l.config(image=icon(kind, color)), add="+")
+    # the name (click it to rename) and, in front of it, the checkbox (click it to check the task off)
+    l = f.title_lbl = tk.Label(f, text=text, fg=color, font=F1, anchor="w", cursor="xterm" if i is not None else "", padx=0, pady=0)
+    l.pack(side="top", anchor="w", padx=(31, 0), pady=(6, 1 if note or noting else 6))
+    cb = tk.Label(f, image=icon(kind, color, gap=0), bd=0, padx=0, pady=0, cursor="hand2")
+    cb.place(x=12, y=6 + l.winfo_reqheight() // 2, anchor="w")  # 6 = the name's top padding
+    cb.bind("<Enter>", lambda e: cb.config(image=icon("check", ACC, gap=0)))  # preview the check
+    cb.bind("<Leave>", lambda e: cb.config(image=icon(kind, color, gap=0)))
+    cb.bind("<Button-1>", lambda e: root.after_idle(click) if i is None else root.after_idle(tick, l, cb, click))
     nl = None
     if noting: note_editor(f, it)
     elif note:  # the whole note in dim text under the title, wrapped to the row's width
-        nl = tk.Label(f, text=note, fg=mix(DIM, BG, .15), font=("Segoe UI", 9), anchor="w", justify="left", width=1, padx=0, pady=0, cursor="hand2")
-        nl.pack(side="top", fill="x", padx=(31, 8), pady=(0, 6)); hover(nl, ACC, nl["fg"])
+        nl = tk.Label(f, text=note, fg=mix(DIM, BG, .15), font=("Segoe UI", 9), anchor="w", justify="left", width=1, padx=0, pady=0)
+        nl.pack(side="top", fill="x", padx=(31, 8), pady=(0, 6))
         nl.bind("<Configure>", lambda e: e.width > 1 and nl.config(wraplength=e.width), add="+")
-        nl.bind("<Button-1>", lambda e: root.after_idle(click) if i is None else root.after_idle(start, "note", i))
+        if i is not None:  # click a task's note to edit it
+            nl.config(cursor="xterm"); hover(nl, ACC, nl["fg"]); nl.bind("<Button-1>", lambda e: root.after_idle(start, "note", i))
     rounded(f, BG, BG)
     if not noting: hover_bg(f, HOV_MAIN, BG)
     if flash is it and i is not None:  # new or restored: start in accent, settle to normal
-        l.config(fg=ACC, image=icon(kind, ACC)); root.after(500, lambda: l.winfo_exists() and l.config(fg=color, image=icon(kind, color)))
-    if i is None:
-        for w in (f, l): w.bind("<Button-1>", lambda e: click())
-    else: dnd(f, (f, l), text, lambda: tick(l, text, click), move_tasks)  # whole row is clickable / draggable
+        l.config(fg=ACC); cb.config(image=icon(kind, ACC, gap=0))
+        root.after(500, lambda: l.winfo_exists() and (l.config(fg=color), cb.config(image=icon(kind, color, gap=0))))
+    if i is not None:  # drag the row (or its name) to reorder; a plain click on the name renames it
+        dnd(f, (f, l), text, lambda w, hit: w is l and start("rename_task", i), move_tasks)
 
 def note_editor(f, it):  # multi-line notes box under the title; saves as you type, grows with the text
     global inline_e
@@ -501,10 +493,10 @@ def note_editor(f, it):  # multi-line notes box under the title; saves as you ty
         keep(); finish(""); return "break"
     t.bind("<KeyRelease>", keep); t.bind("<Escape>", close); t.bind("<Control-Return>", close)
     t.bind("<FocusOut>", lambda e: t is inline_e and close())
-    root.after_idle(grow)
+    t.bind("<Configure>", lambda e: grow())  # first real width is only known once it's laid out
 
-def tick(l, text, then):  # little check-off moment before the task leaves the list
-    l.config(image=icon("check", ACC), fg=ACC, font=(*F1, "overstrike")); l.unbind("<Leave>")
+def tick(l, cb, then):  # little check-off moment before the task leaves the list
+    cb.config(image=icon("check", ACC, gap=0)); cb.unbind("<Leave>"); l.config(fg=ACC, font=(*F1, "overstrike"))
     root.after(220, then)
 
 def toast(msg):  # small message that fades out at the bottom of the main column
