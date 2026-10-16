@@ -25,7 +25,8 @@ PALETTE = ["#f07178", "#f5a35c", "#e6c75c", "#4fc38a", "#4fc1c9", "#5b8def", "#a
 HOV_SIDE, HOV_MAIN, FOCUS = "#36383e", "#26282c", "#43464d"  # hover / focused shades
 F1, F2, F3 = ("Segoe UI", 11), ("Segoe UI Semibold", 20), ("Segoe UI", 9, "bold")
 R = 6  # corner radius
-MAIN_TOP, HEAD_PAD = 22, 6  # main column's top padding; vertical padding of a sidebar category name
+MARGIN = 16  # gap between the window's edges (and the divider) and the content, the same on every side
+HEAD_PAD = 6  # vertical padding of a sidebar category name
 TX, GUT = 22, 11  # sidebar: text starts TX px into each row box; dots/ticks/icons sit centered at GUT
 DONE = "\0done"
 
@@ -122,6 +123,10 @@ def dot_img(color, bg, D=8):  # smooth round dot drawn as an image (font "●" g
         _dots[color, bg] = im
     return _dots[color, bg]
 
+def cap_inset(font):  # gap between the top of a line of text and the top of its CAPITAL letters
+    size = float(root.tk.call("font", "actual", font, "-size")); px = abs(size) if size < 0 else size * root.winfo_fpixels("1i") / 72
+    return int(root.tk.call("font", "metrics", font, "-ascent")) - int(-(-.7 * px // 1))  # cap height ≈ 0.7 em, rounded up as drawn
+
 def caps_mid(font):  # vertical offset from a label's center to the middle of its CAPITAL letters
     m = {k: int(root.tk.call("font", "metrics", font, "-" + k)) for k in ("ascent", "descent")}
     size = float(root.tk.call("font", "actual", font, "-size"))
@@ -156,7 +161,7 @@ def hover_bg(f, on, off):  # hover highlight (and ✕ / tools reveal) that survi
 
 PLUS = lambda color: icon("plus", color, S=11, gap=0)  # every "+" in the app
 
-def addbtn(parent, cmd, bg=SIDE, hov=HOV_SIDE, text=None):  # "+" (and maybe a label) on no background; soft box + accent on hover
+def addbtn(parent, cmd, bg=SIDE, hov=HOV_SIDE, text=None, hot=ACC):  # "+" (and maybe a label) on no background; soft box + hot color on hover
     b = tk.Frame(parent, cursor="hand2"); p = tk.Label(b, image=PLUS(DIM), bd=0); l = None
     if text:  # plus in the gutter, text styled like a category name, both centered to the pixel on the box
         off = caps_mid(F3)  # Segoe's capitals sit below the middle of its line box
@@ -164,7 +169,7 @@ def addbtn(parent, cmd, bg=SIDE, hov=HOV_SIDE, text=None):  # "+" (and maybe a l
         b.bind("<Configure>", lambda e: (p.place(x=GUT - 11 // 2, y=(e.height - 11) // 2, anchor="nw"), p.lift()), add="+")  # over the text label
     else: p.pack(padx=6, pady=5)  # (image labels ignore their own padx)
     rounded(b, bg, bg); hover_bg(b, hov, bg)
-    b.on_hot = lambda h: (p.config(image=PLUS(ACC if h else DIM)), l and l.config(fg=ACC if h else DIM))
+    b.on_hot = lambda h: (p.config(image=PLUS(hot if h else DIM)), l and l.config(fg=hot if h else DIM))
     for w in (b, p, l):
         if w: w.bind("<Button-1>", lambda e: root.after_idle(cmd))
     return b
@@ -206,19 +211,24 @@ def resize(e):
     side.config(width=w); d["side"] = w
 div.bind("<B1-Motion>", resize); div.bind("<ButtonRelease-1>", lambda e: save())
 
-# top gap sized so the first category name lines up with the "● CATEGORY" label over the list title (its pady=1)
-tk.Frame(side, bg=SIDE, height=MAIN_TOP + 1 - HEAD_PAD).pack(fill="x")
+# the first category name and the "● CATEGORY" label over the list title both start MARGIN below the top
+# (2 = a label's border; the crumb label has pady=1)
+SIDE_TOP, MAIN_TOP = MARGIN - HEAD_PAD - 2 - cap_inset(F3), MARGIN - 1 - 2 - cap_inset(F3)
+tk.Frame(side, bg=SIDE, height=SIDE_TOP).pack(fill="x")
 catsbox = tk.Frame(side, bg=SIDE); cats = tk.Frame(catsbox, bg=SIDE); cats.pack(fill="x")
 ncholder = tk.Frame(side, bg=SIDE); ncholder.pack(fill="x")  # holds the "New category" button or its name box
-donebtn = tk.Frame(side, cursor="hand2"); donebtn.pack(side="bottom", fill="x", padx=8, pady=10)
-donelbl = tk.Label(donebtn, fg=DIM, font=F1, anchor="w", padx=TX, pady=7); donelbl.pack(fill="x")
+DONE_PAD = 7  # "Completed" button's vertical padding; with its 2px border, its text ("p" reaches the line's bottom) ends MARGIN up
+DONE_BOT = MARGIN - DONE_PAD - 2
+donebtn = tk.Frame(side, cursor="hand2"); donebtn.pack(side="bottom", fill="x", padx=MARGIN, pady=(10, DONE_BOT))
+donelbl = tk.Label(donebtn, fg=DIM, font=F1, anchor="w", padx=TX, pady=DONE_PAD); donelbl.pack(fill="x")
 donechk = tk.Label(donebtn, image=icon("check", DIM, gap=0), bd=0); donechk.place(x=GUT, rely=.5, anchor="center")
 rounded(donebtn, SIDE, SIDE)
 
-main = tk.Frame(root, bg=BG); main.pack(side="left", fill="both", expand=True, padx=28, pady=MAIN_TOP)
+main = tk.Frame(root, bg=BG); main.pack(side="left", fill="both", expand=True, padx=MARGIN, pady=(MAIN_TOP, MARGIN))
 crumbf = tk.Frame(main, bg=BG)  # "● CATEGORY" above the list title
-crumb = tk.Label(crumbf, bg=BG, font=F3, anchor="w", width=1, padx=0, pady=1); crumb.pack(fill="x", padx=(16, 0)); crumb.target = DIM
-crumbdot = tk.Label(crumbf, bg=BG, bd=0); crumbdot.place(x=4, rely=.5, y=caps_mid(F3), anchor="center")
+CRUMB_DOT = 4  # center of the dot; the name then starts TX - GUT after it, the same spacing as the sidebar's category names
+crumb = tk.Label(crumbf, bg=BG, font=F3, anchor="w", width=1, padx=0, pady=1); crumb.pack(fill="x", padx=(CRUMB_DOT + TX - GUT, 0)); crumb.target = DIM
+crumbdot = tk.Label(crumbf, bg=BG, bd=0); crumbdot.place(x=CRUMB_DOT, rely=.5, y=caps_mid(F3), anchor="center")
 titlebar = tk.Frame(main, bg=BG); titlebar.pack(fill="x")
 title = tk.Label(titlebar, bg=BG, fg=FG, font=F2, anchor="w", width=1); title.pack(fill="x")
 title.bind("<Button-1>", lambda e: sel and sel != DONE and on_text(e) and root.after_idle(start, "title", sel))  # click to rename
@@ -286,7 +296,7 @@ def move_lists():  # rebuild categories from the sidebar's on-screen order
 # --- inline text box for renaming a category / list / task
 def inline(text, key=None, parent=None, font=F1):
     parent = parent or cats; sb = parent in (cats, ncholder)  # sidebar box?
-    box = tk.Frame(parent); box.pack(fill="x", padx=8 if sb else 0, pady=2 if font == F1 else 0); box.key = key
+    box = tk.Frame(parent); box.pack(fill="x", padx=MARGIN if sb else 0, pady=2 if font == F1 else 0); box.key = key
     e = tk.Entry(box, fg=FG, insertbackground=FG, relief="flat", font=font, highlightthickness=0, bd=0)
     tr = parent is rows  # task row: text lines up with task names, checkbox in the icon spot
     e.pack(fill="x", padx=(TX if sb else 31 if tr else 16, 10) if font == F1 else (8, 8), pady=7 if font == F1 else 1)
@@ -376,7 +386,7 @@ def render():
 
 def divider():  # thin line across the sidebar
     sep = tk.Frame(cats, bg=SIDE, height=13); sep.pack(fill="x"); sep.key = None
-    tk.Frame(sep, bg=HI, height=1).place(x=8, relwidth=1, width=-16, rely=.5)
+    tk.Frame(sep, bg=HI, height=1).place(x=MARGIN, relwidth=1, width=-2 * MARGIN, rely=.5)
 
 def build_side():
     global cats
@@ -387,7 +397,7 @@ def build_side():
         if editing == ("rename", g): inline(g, ("g", g))
         elif confirm == ("group", g): confirm_row(f"{g.upper()}  +{len(names)}", ("g", g), F3)
         else:
-            h = tk.Frame(cats, bg=SIDE); h.pack(fill="x", padx=8); h.key = ("g", g)
+            h = tk.Frame(cats, bg=SIDE); h.pack(fill="x", padx=MARGIN); h.key = ("g", g)
             xbtn(h, SIDE, lambda g=g: delgroup(g))
             hover_bg(h, SIDE, SIDE)
             dot = tk.Label(h, image=dot_img(col or X, SIDE), bg=SIDE, bd=0, padx=4, pady=4, cursor="hand2")
@@ -400,7 +410,7 @@ def build_side():
         for c in names:
             if editing == ("rename_list", c): inline(c, ("l", c)); continue
             if confirm == ("list", c): confirm_row(c, ("l", c)); continue
-            f = tk.Frame(cats, cursor="hand2"); f.pack(fill="x", padx=8); f.key = ("l", c)
+            f = tk.Frame(cats, cursor="hand2"); f.pack(fill="x", padx=MARGIN); f.key = ("l", c)
             slot = tk.Frame(f, width=28); slot.deep = True  # right end: the task count, or the ✕ while hovered
             slot.pack(side="right", fill="y", padx=(0, 4)); slot.pack_propagate(False)
             f.xb = xlabel(slot, SIDE, lambda c=c: delcat(c)); f.xb.place(relx=.5, rely=.5, anchor="center")
@@ -416,13 +426,13 @@ def build_side():
             t.bind("<Motion>", lambda e, c=c, t=t: t.config(cursor="xterm" if c == sel and on_text(e) else "hand2"))
             side_rows[c] = (f, n, bar, col)
         if editing == ("new_list", g): inline("")
-        else: addbtn(cats, lambda g=g: start("new_list", g)).pack(anchor="w", padx=8, pady=(2, 4))  # plus centered on the ticks
+        else: addbtn(cats, lambda g=g: start("new_list", g), hot=col or ACC).pack(anchor="w", padx=MARGIN, pady=(2, 4))  # plus centered on the ticks; category color on hover
     if d["groups"]: divider()  # and one above "New category"
     swap(old, cats)
     show(catsbox, bool(d["groups"]), fill="x", before=ncholder)  # empty frames keep their old height
     for w in ncholder.winfo_children(): w.destroy()
     if editing == ("new_cat", ""): inline("", None, ncholder)
-    else: addbtn(ncholder, lambda: start("new_cat", ""), text="NEW CATEGORY").pack(fill="x", padx=8)
+    else: addbtn(ncholder, lambda: start("new_cat", ""), text="NEW CATEGORY", hot=FG).pack(fill="x", padx=MARGIN)  # white on hover
 
 def build_main():
     global flash, rows, shown_sel
@@ -451,8 +461,11 @@ def build_main():
         if not L:  # empty list: a big, faint checkmark in the background
             bgc = tk.Label(rows, image=icon("check", mix(BG, DIM, .16), S=110, gap=0), bg=BG, bd=0)
             bgc.place(relx=.5, rely=.45, anchor="center"); bgc.lower()
+            if editing != ("new_task", sel):  # and a hint under it (not while the first task is being typed)
+                tk.Label(rows, text="No tasks. Click the + button to add one.", bg=BG, fg=DIM, font=F1).place(
+                    relx=.5, rely=.45, y=110 // 2 + 14, anchor="n")
         if editing == ("new_task", sel): inline("", None, rows)
-        else: addbtn(rows, lambda: start("new_task", sel), BG, HOV_MAIN).pack(anchor="w", padx=6, pady=(2, 0))  # under the checkboxes
+        else: addbtn(rows, lambda: start("new_task", sel), BG, HOV_MAIN, hot=d["colors"].get(grp) or ACC).pack(anchor="w", padx=6, pady=(2, 0))  # under the checkboxes; category color on hover
     else:
         fit(title, "Add a list in the sidebar  ←")
     swap(old, rows)
@@ -572,7 +585,7 @@ def first_list(): return next(iter(d["lists"]), None)
 # --- deleting lists / categories asks right in the row: "Delete …?  Cancel  Delete"
 def confirm_row(text, key, font=F1):  # same size as the row it replaces: name, then ✓ (delete) and ✕ (cancel)
     global confirm_w
-    f = confirm_w = tk.Frame(cats); f.pack(fill="x", padx=8); f.key = key
+    f = confirm_w = tk.Frame(cats); f.pack(fill="x", padx=MARGIN); f.key = key
     no = tk.Label(f, image=xmark(DIM), bd=0, cursor="hand2"); no.pack(side="right", padx=(0, 4))  # where the X was
     yes = tk.Label(f, image=icon("check", RED, gap=0), padx=8, cursor="hand2"); yes.pack(side="right")
     t = tk.Label(f, fg=FG, font=font, padx=TX, pady=6, anchor="w", width=1); t.pack(side="left", fill="x", expand=True); fit(t, text)
