@@ -1,0 +1,5 @@
+# personal data and machine-specific files
+todo.json
+todo.json.tmp
+To-Do.lnk
+__pycache__/
