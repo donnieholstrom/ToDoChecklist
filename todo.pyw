@@ -25,6 +25,7 @@ PALETTE = ["#f07178", "#f5a35c", "#e6c75c", "#4fc38a", "#4fc1c9", "#5b8def", "#a
 HOV_SIDE, HOV_MAIN, FOCUS = "#36383e", "#26282c", "#43464d"  # hover / focused shades
 F1, F2, F3 = ("Segoe UI", 11), ("Segoe UI Semibold", 20), ("Segoe UI", 9, "bold")
 R = 6  # corner radius
+MAIN_TOP, HEAD_PAD = 22, 6  # main column's top padding; vertical padding of a sidebar category name
 TX, GUT = 22, 11  # sidebar: text starts TX px into each row box; dots/ticks/icons sit centered at GUT
 DONE = "\0done"
 
@@ -190,7 +191,8 @@ def resize(e):
     side.config(width=w); d["side"] = w
 div.bind("<B1-Motion>", resize); div.bind("<ButtonRelease-1>", lambda e: save())
 
-tk.Frame(side, bg=SIDE, height=10).pack(fill="x")
+# top gap sized so the first category name lines up with the "● CATEGORY" label over the list title (its pady=1)
+tk.Frame(side, bg=SIDE, height=MAIN_TOP + 1 - HEAD_PAD).pack(fill="x")
 catsbox = tk.Frame(side, bg=SIDE); cats = tk.Frame(catsbox, bg=SIDE); cats.pack(fill="x")
 ncholder = tk.Frame(side, bg=SIDE); ncholder.pack(fill="x")  # holds the "New category" button or its name box
 donebtn = tk.Frame(side, cursor="hand2"); donebtn.pack(side="bottom", fill="x", padx=8, pady=10)
@@ -198,9 +200,9 @@ donelbl = tk.Label(donebtn, fg=DIM, font=F1, anchor="w", padx=TX, pady=7); donel
 donechk = tk.Label(donebtn, image=icon("check", DIM, gap=0), bd=0); donechk.place(x=GUT, rely=.5, anchor="center")
 rounded(donebtn, SIDE, SIDE)
 
-main = tk.Frame(root, bg=BG); main.pack(side="left", fill="both", expand=True, padx=28, pady=22)
+main = tk.Frame(root, bg=BG); main.pack(side="left", fill="both", expand=True, padx=28, pady=MAIN_TOP)
 crumbf = tk.Frame(main, bg=BG)  # "● CATEGORY" above the list title
-crumb = tk.Label(crumbf, bg=BG, font=F3, anchor="w", width=1, padx=0); crumb.pack(fill="x", padx=(16, 0)); crumb.target = DIM
+crumb = tk.Label(crumbf, bg=BG, font=F3, anchor="w", width=1, padx=0, pady=1); crumb.pack(fill="x", padx=(16, 0)); crumb.target = DIM
 crumbdot = tk.Label(crumbf, bg=BG, bd=0); crumbdot.place(x=4, rely=.5, y=caps_mid(F3), anchor="center")
 titlebar = tk.Frame(main, bg=BG); titlebar.pack(fill="x")
 title = tk.Label(titlebar, bg=BG, fg=FG, font=F2, anchor="w", width=1); title.pack(fill="x")
@@ -373,7 +375,7 @@ def build_side():
             hover_bg(h, SIDE, SIDE)
             dot = tk.Label(h, image=dot_img(col or X, SIDE), bg=SIDE, bd=0, padx=4, pady=4, cursor="hand2")
             dot.bind("<Button-1>", lambda e, g=g, w=dot: root.after_idle(palette, g, w))
-            l = tk.Label(h, bg=SIDE, fg=mix(col, FG, .25) if col else DIM, font=F3, padx=TX, pady=6, anchor="w", width=1)
+            l = tk.Label(h, bg=SIDE, fg=mix(col, FG, .25) if col else DIM, font=F3, padx=TX, pady=HEAD_PAD, anchor="w", width=1)
             l.pack(side="left", fill="x", expand=True); fit(l, g.upper())
             dot.place(x=GUT, rely=.5, y=caps_mid(F3), anchor="center"); dot.lift()
             l.bind("<Button-1>", lambda e, g=g: on_text(e) and root.after_idle(start, "rename", g))
