@@ -148,14 +148,22 @@ def hover_bg(f, on, off):  # hover highlight (and ✕ / tools reveal) that survi
     f.bind("<Enter>", lambda e: hot(True))
     f.bind("<Leave>", lambda e: root.after(1, lambda: f.winfo_exists() and not drag.get("g") and hot(inside())))
 
-def newbtn(parent, text, cmd):  # slim "+ New …" button; clicking it opens a name box in its place
+def newbtn(parent, text, cmd, font=("Segoe UI", 10)):  # slim "+ New …" button; clicking it opens a name box in its place
     b = tk.Frame(parent, cursor="hand2")
-    font = ("Segoe UI", 10); off = caps_mid(font)  # Segoe's capitals sit below the middle of its line box
+    off = caps_mid(font)  # Segoe's capitals sit below the middle of its line box
     l = tk.Label(b, text=text, fg=DIM, font=font, anchor="w", padx=TX, pady=0); l.pack(fill="x", pady=(4 - off, 4 + off))
     plus = tk.Label(b, image=icon("plus", DIM, S=11, gap=0), bd=0)  # in the gutter, centered to the pixel on the box
     b.bind("<Configure>", lambda e: plus.place(x=GUT - 11 // 2, y=(e.height - 11) // 2, anchor="nw"), add="+")
     rounded(b, HI, SIDE); hover_bg(b, FOCUS, HI)
     for w in (b, l, plus): w.bind("<Button-1>", lambda e: root.after_idle(cmd))
+    return b
+
+def plusbtn(parent, cmd):  # just a "+", lined up with the lists' color ticks; a soft box shows on hover
+    b = tk.Frame(parent, cursor="hand2")
+    p = tk.Label(b, image=icon("plus", DIM, S=11, gap=0), bd=0); p.pack(padx=6, pady=5)  # (image labels ignore their own padx)
+    rounded(b, SIDE, SIDE); hover_bg(b, HOV_SIDE, SIDE)
+    p.bind("<Enter>", lambda e: p.config(image=icon("plus", ACC, S=11, gap=0))); p.bind("<Leave>", lambda e: p.config(image=icon("plus", DIM, S=11, gap=0)))
+    for w in (b, p): w.bind("<Button-1>", lambda e: root.after_idle(cmd))
     return b
 
 def fit(l, text=None):  # cut text to the label's width with "…"; refits whenever the label resizes
@@ -359,14 +367,16 @@ def render():
     for c in side_rows: style_list(c)
     build_main()
 
+def divider():  # thin line across the sidebar
+    sep = tk.Frame(cats, bg=SIDE, height=13); sep.pack(fill="x"); sep.key = None
+    tk.Frame(sep, bg=HI, height=1).place(x=8, relwidth=1, width=-16, rely=.5)
+
 def build_side():
     global cats
     old, cats = cats, tk.Frame(catsbox, bg=SIDE); side_rows.clear()
     for gi, (g, names) in enumerate(d["groups"].items()):
         col = d["colors"].get(g)
-        if gi:  # thin line between categories
-            sep = tk.Frame(cats, bg=SIDE, height=13); sep.pack(fill="x"); sep.key = None
-            tk.Frame(sep, bg=HI, height=1).place(x=8, relwidth=1, width=-16, rely=.5)
+        if gi: divider()  # thin line between categories
         if editing == ("rename", g): inline(g, ("g", g))
         elif confirm == ("group", g): confirm_row(f"{g.upper()}  +{len(names)}", ("g", g), F3)
         else:
@@ -397,12 +407,13 @@ def build_side():
             t.bind("<Motion>", lambda e, c=c, t=t: t.config(cursor="xterm" if c == sel and on_text(e) else "hand2"))
             side_rows[c] = (f, n, bar, col)
         if editing == ("new_list", g): inline("")
-        else: newbtn(cats, "New list", lambda g=g: start("new_list", g)).pack(fill="x", padx=8, pady=(2, 4))
+        else: plusbtn(cats, lambda g=g: start("new_list", g)).pack(anchor="w", padx=8, pady=(2, 4))  # plus centered on the ticks
+    if d["groups"]: divider()  # and one above "New category"
     swap(old, cats)
-    show(catsbox, bool(d["groups"]), fill="x", pady=(0, 8), before=ncholder)  # empty frames keep their old height
+    show(catsbox, bool(d["groups"]), fill="x", before=ncholder)  # empty frames keep their old height
     for w in ncholder.winfo_children(): w.destroy()
     if editing == ("new_cat", ""): inline("", None, ncholder)
-    else: newbtn(ncholder, "New category", lambda: start("new_cat", "")).pack(fill="x", padx=8)
+    else: newbtn(ncholder, "NEW CATEGORY", lambda: start("new_cat", ""), F3).pack(fill="x", padx=8)  # styled like a category name
 
 def build_main():
     global flash, rows, shown_sel
