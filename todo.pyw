@@ -68,7 +68,7 @@ def paint(f, color):  # recolor a frame, its children and its corners
     f.config(bg=color)
     for c in f.winfo_children():
         if c not in getattr(f, "corners", ()) and not getattr(c, "keep", False): c.config(bg=color)
-    if getattr(f, "xb", None): f.xb.config(fg=color)
+    if getattr(f, "xb", None): f.xb.config(image=xmark(None))
     for c, im in zip(getattr(f, "corners", ()), corners(color, getattr(f, "outer", color))): c.config(image=im); c.lift()
 
 def png(w, h, rgba):  # build a Tk image from RGBA pixels via a tiny in-memory PNG (real alpha = smooth on any bg)
@@ -99,6 +99,17 @@ def icon(kind, color, S=12, gap=7):  # anti-aliased icons drawn on a 12-unit gri
         _icons[kind, color, gap, S] = png(W, S, px)
     return _icons[kind, color, gap, S]
 
+_xs = {}
+def xmark(color, W=28, H=20, r=4, w=1.5):  # delete "X": two round-capped strokes, centered in a W x H click area
+    if color not in _xs:
+        c = [int(color[i:i + 2], 16) for i in (1, 3, 5)] if color else [0, 0, 0]; px = []; cx, cy = W / 2, H / 2
+        for y in range(H):
+            for x in range(W):
+                dist = min(seg_dist(x + .5, y + .5, cx - r, cy - r, cx + r, cy + r), seg_dist(x + .5, y + .5, cx + r, cy - r, cx - r, cy + r))
+                px += c + [round(255 * max(0, min(1, w / 2 - dist + .5))) if color else 0]
+        _xs[color] = png(W, H, px)
+    return _xs[color]
+
 _dots = {}
 def dot_img(color, bg, D=8):  # smooth round dot drawn as an image (font "●" glyphs sit on the baseline, off-center)
     if (color, bg) not in _dots:
@@ -122,7 +133,7 @@ def hover_bg(f, on, off):  # hover highlight (and ✕ / tools reveal) that survi
     def hot(h):
         if on != off: paint(f, on if h else off)
         xb = getattr(f, "xb", None)
-        if xb: xb.config(fg=X if h else f["bg"])  # hidden = drawn in the row's own color, so nothing shifts
+        if xb: xb.config(image=xmark(X) if h else xmark(None))  # hidden = transparent, so nothing shifts
         p = getattr(f, "tools", None)
         if p and h:  # float it just left of the row's right-side buttons, over the end of the name
             pad = lambda w: (lambda v: sum(v) if isinstance(v, tuple) else int(v))(w.pack_info()["padx"])
@@ -139,7 +150,7 @@ def hover_bg(f, on, off):  # hover highlight (and ✕ / tools reveal) that survi
 def newbtn(parent, text, cmd):  # slim "+ New …" button; clicking it opens a name box in its place
     b = tk.Frame(parent, cursor="hand2")
     l = tk.Label(b, text=text, fg=DIM, font=("Segoe UI", 10), anchor="w", padx=TX, pady=4); l.pack(fill="x")
-    plus = tk.Label(b, text="+", fg=DIM, font=F1); plus.place(x=GUT, rely=.5, anchor="center")  # in the gutter
+    plus = tk.Label(b, image=icon("plus", DIM, S=11, gap=0), bd=0); plus.place(x=GUT, rely=.5, anchor="center")  # in the gutter
     rounded(b, HI, SIDE); hover_bg(b, FOCUS, HI)
     for w in (b, l, plus): w.bind("<Button-1>", lambda e: root.after_idle(cmd))
     return b
@@ -157,9 +168,10 @@ def fit(l, text=None):  # cut text to the label's width with "…"; refits whene
 def hover(w, on, off):
     w.bind("<Enter>", lambda e: w.config(fg=on), add="+"); w.bind("<Leave>", lambda e: w.config(fg=off), add="+")
 
-def xbtn(parent, bg, cmd, text="✕", on=RED):  # delete button, only visible while its row is hovered
-    x = parent.xb = tk.Label(parent, text=text, bg=bg, fg=bg, font=F1, padx=8, cursor="hand2"); x.pack(side="right", padx=(0, 4))
-    x.bind("<Button-1>", lambda e: root.after_idle(cmd)); hover(x, on, X)
+def xbtn(parent, bg, cmd, on=RED):  # delete button, only visible while its row is hovered
+    x = parent.xb = tk.Label(parent, image=xmark(None), bg=bg, bd=0, cursor="hand2"); x.pack(side="right", padx=(0, 4))
+    x.bind("<Button-1>", lambda e: root.after_idle(cmd))
+    x.bind("<Enter>", lambda e: x.config(image=xmark(on))); x.bind("<Leave>", lambda e: x.config(image=xmark(X)))
     return x
 
 def on_text(e):  # did this click land on a label's text, rather than the empty space beside it?
@@ -427,7 +439,7 @@ def build_main():
     swap(old, rows)
     if switched:  # soft fade-in of the newly opened list
         fade([(title, FG), (crumb, crumb.target)] + [(c, c["fg"]) for f in rows.winfo_children() for c in [f, *f.winfo_children()]
-              if isinstance(c, tk.Label) and c["text"] and c["text"] not in ("✕",)])  # title/crumb: their real colors, not mid-fade ones
+              if isinstance(c, tk.Label) and c["text"]])  # title/crumb: their real colors, not mid-fade ones
     flash = None
 
 def drop(L, it):  # remove this exact item (two tasks can have the same text)
@@ -542,10 +554,11 @@ def first_list(): return next(iter(d["lists"]), None)
 def confirm_row(text, key, font=F1):  # same size as the row it replaces: name, then ✓ (delete) and ✕ (cancel)
     global confirm_w
     f = confirm_w = tk.Frame(cats); f.pack(fill="x", padx=8); f.key = key
-    no = tk.Label(f, text="✕", fg=DIM, font=F1, padx=8, cursor="hand2"); no.pack(side="right", padx=(0, 4))  # where ✕ was
+    no = tk.Label(f, image=xmark(DIM), bd=0, cursor="hand2"); no.pack(side="right", padx=(0, 4))  # where the X was
     yes = tk.Label(f, image=icon("check", RED, gap=0), padx=8, cursor="hand2"); yes.pack(side="right")
     t = tk.Label(f, fg=FG, font=font, padx=TX, pady=6, anchor="w", width=1); t.pack(side="left", fill="x", expand=True); fit(t, text)
-    rounded(f, mix(SIDE, RED, .18), SIDE); hover(no, FG, DIM)
+    rounded(f, mix(SIDE, RED, .18), SIDE)
+    no.bind("<Enter>", lambda e: no.config(image=xmark(FG))); no.bind("<Leave>", lambda e: no.config(image=xmark(DIM)))
     yes.bind("<Enter>", lambda e: yes.config(image=icon("check", "#ff8a80", gap=0))); yes.bind("<Leave>", lambda e: yes.config(image=icon("check", RED, gap=0)))
     yes.bind("<Button-1>", lambda e: root.after_idle(do_delete)); no.bind("<Button-1>", lambda e: root.after_idle(ask, None))
 
