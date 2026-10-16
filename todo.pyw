@@ -69,6 +69,8 @@ def paint(f, color):  # recolor a frame, its children and its corners
     f.config(bg=color)
     for c in f.winfo_children():
         if c not in getattr(f, "corners", ()) and not getattr(c, "keep", False): c.config(bg=color)
+        if getattr(c, "deep", False):
+            for cc in c.winfo_children(): cc.config(bg=color)
     if getattr(f, "xb", None): f.xb.config(image=xmark(None))
     for c, im in zip(getattr(f, "corners", ()), corners(color, getattr(f, "outer", color))): c.config(image=im); c.lift()
 
@@ -135,6 +137,10 @@ def hover_bg(f, on, off):  # hover highlight (and ✕ / tools reveal) that survi
         if on != off: paint(f, on if h else off)
         xb = getattr(f, "xb", None)
         if xb: xb.config(image=xmark(X) if h else xmark(None))  # hidden = transparent, so nothing shifts
+        n = getattr(f, "cnt", None)  # list rows: the ✕ takes the task count's spot while hovered
+        if n and h: n.place_forget()
+        elif n: n.place(relx=.5, rely=.5, anchor="center"); n.lift()
+        if hasattr(f, "on_hot"): f.on_hot(h)
         p = getattr(f, "tools", None)
         if p and h:  # float it just left of the row's right-side buttons, over the end of the name
             pad = lambda w: (lambda v: sum(v) if isinstance(v, tuple) else int(v))(w.pack_info()["padx"])
@@ -148,22 +154,19 @@ def hover_bg(f, on, off):  # hover highlight (and ✕ / tools reveal) that survi
     f.bind("<Enter>", lambda e: hot(True))
     f.bind("<Leave>", lambda e: root.after(1, lambda: f.winfo_exists() and not drag.get("g") and hot(inside())))
 
-def newbtn(parent, text, cmd, font=("Segoe UI", 10)):  # slim "+ New …" button; clicking it opens a name box in its place
-    b = tk.Frame(parent, cursor="hand2")
-    off = caps_mid(font)  # Segoe's capitals sit below the middle of its line box
-    l = tk.Label(b, text=text, fg=DIM, font=font, anchor="w", padx=TX, pady=0); l.pack(fill="x", pady=(4 - off, 4 + off))
-    plus = tk.Label(b, image=icon("plus", DIM, S=11, gap=0), bd=0)  # in the gutter, centered to the pixel on the box
-    b.bind("<Configure>", lambda e: plus.place(x=GUT - 11 // 2, y=(e.height - 11) // 2, anchor="nw"), add="+")
-    rounded(b, HI, SIDE); hover_bg(b, FOCUS, HI)
-    for w in (b, l, plus): w.bind("<Button-1>", lambda e: root.after_idle(cmd))
-    return b
+PLUS = lambda color: icon("plus", color, S=11, gap=0)  # every "+" in the app
 
-def plusbtn(parent, cmd):  # just a "+", lined up with the lists' color ticks; a soft box shows on hover
-    b = tk.Frame(parent, cursor="hand2")
-    p = tk.Label(b, image=icon("plus", DIM, S=11, gap=0), bd=0); p.pack(padx=6, pady=5)  # (image labels ignore their own padx)
-    rounded(b, SIDE, SIDE); hover_bg(b, HOV_SIDE, SIDE)
-    p.bind("<Enter>", lambda e: p.config(image=icon("plus", ACC, S=11, gap=0))); p.bind("<Leave>", lambda e: p.config(image=icon("plus", DIM, S=11, gap=0)))
-    for w in (b, p): w.bind("<Button-1>", lambda e: root.after_idle(cmd))
+def addbtn(parent, cmd, bg=SIDE, hov=HOV_SIDE, text=None):  # "+" (and maybe a label) on no background; soft box + accent on hover
+    b = tk.Frame(parent, cursor="hand2"); p = tk.Label(b, image=PLUS(DIM), bd=0); l = None
+    if text:  # plus in the gutter, text styled like a category name, both centered to the pixel on the box
+        off = caps_mid(F3)  # Segoe's capitals sit below the middle of its line box
+        l = tk.Label(b, text=text, fg=DIM, font=F3, anchor="w", padx=TX, pady=0); l.pack(fill="x", pady=(HEAD_PAD - off, HEAD_PAD + off))  # spaced like a category name
+        b.bind("<Configure>", lambda e: (p.place(x=GUT - 11 // 2, y=(e.height - 11) // 2, anchor="nw"), p.lift()), add="+")  # over the text label
+    else: p.pack(padx=6, pady=5)  # (image labels ignore their own padx)
+    rounded(b, bg, bg); hover_bg(b, hov, bg)
+    b.on_hot = lambda h: (p.config(image=PLUS(ACC if h else DIM)), l and l.config(fg=ACC if h else DIM))
+    for w in (b, p, l):
+        if w: w.bind("<Button-1>", lambda e: root.after_idle(cmd))
     return b
 
 def fit(l, text=None):  # cut text to the label's width with "…"; refits whenever the label resizes
@@ -179,10 +182,14 @@ def fit(l, text=None):  # cut text to the label's width with "…"; refits whene
 def hover(w, on, off):
     w.bind("<Enter>", lambda e: w.config(fg=on), add="+"); w.bind("<Leave>", lambda e: w.config(fg=off), add="+")
 
-def xbtn(parent, bg, cmd, on=RED):  # delete button, only visible while its row is hovered
-    x = parent.xb = tk.Label(parent, image=xmark(None), bg=bg, bd=0, cursor="hand2"); x.pack(side="right", padx=(0, 4))
+def xlabel(parent, bg, cmd, on=RED):  # delete "X", transparent until its row is hovered
+    x = tk.Label(parent, image=xmark(None), bg=bg, bd=0, cursor="hand2")
     x.bind("<Button-1>", lambda e: root.after_idle(cmd))
     x.bind("<Enter>", lambda e: x.config(image=xmark(on))); x.bind("<Leave>", lambda e: x.config(image=xmark(X)))
+    return x
+
+def xbtn(parent, bg, cmd, on=RED):  # delete button at the row's right end, only visible while the row is hovered
+    x = parent.xb = xlabel(parent, bg, cmd, on); x.pack(side="right", padx=(0, 4))
     return x
 
 def on_text(e):  # did this click land on a label's text, rather than the empty space beside it?
@@ -394,8 +401,10 @@ def build_side():
             if editing == ("rename_list", c): inline(c, ("l", c)); continue
             if confirm == ("list", c): confirm_row(c, ("l", c)); continue
             f = tk.Frame(cats, cursor="hand2"); f.pack(fill="x", padx=8); f.key = ("l", c)
-            xbtn(f, SIDE, lambda c=c: delcat(c))
-            n = tk.Label(f, fg=DIM, font=F1); n.pack(side="right")
+            slot = tk.Frame(f, width=28); slot.deep = True  # right end: the task count, or the ✕ while hovered
+            slot.pack(side="right", fill="y", padx=(0, 4)); slot.pack_propagate(False)
+            f.xb = xlabel(slot, SIDE, lambda c=c: delcat(c)); f.xb.place(relx=.5, rely=.5, anchor="center")
+            n = f.cnt = tk.Label(slot, fg=DIM, font=F1, bd=0, padx=0, pady=0); n.place(relx=.5, rely=.5, anchor="center")
             t = tk.Label(f, fg=FG, font=F1, padx=TX, pady=6, anchor="w", width=1)
             t.pack(side="left", fill="x", expand=True); fit(t, c)
             rounded(f, SIDE, SIDE); bar = None
@@ -403,17 +412,17 @@ def build_side():
                 bar = tk.Frame(f, width=3, height=14, bg=mix(SIDE, col, .5)); bar.keep = True
                 bar.place(x=GUT, rely=.5, anchor="center")
             # click another list to open it; click the open list's name to rename it
-            dnd(f, (f, n, t), c, lambda w, hit, c=c, t=t: pick(c) if c != sel else w is t and hit and start("rename_list", c), move_lists)
+            dnd(f, (f, slot, n, t), c, lambda w, hit, c=c, t=t: pick(c) if c != sel else w is t and hit and start("rename_list", c), move_lists)
             t.bind("<Motion>", lambda e, c=c, t=t: t.config(cursor="xterm" if c == sel and on_text(e) else "hand2"))
             side_rows[c] = (f, n, bar, col)
         if editing == ("new_list", g): inline("")
-        else: plusbtn(cats, lambda g=g: start("new_list", g)).pack(anchor="w", padx=8, pady=(2, 4))  # plus centered on the ticks
+        else: addbtn(cats, lambda g=g: start("new_list", g)).pack(anchor="w", padx=8, pady=(2, 4))  # plus centered on the ticks
     if d["groups"]: divider()  # and one above "New category"
     swap(old, cats)
     show(catsbox, bool(d["groups"]), fill="x", before=ncholder)  # empty frames keep their old height
     for w in ncholder.winfo_children(): w.destroy()
     if editing == ("new_cat", ""): inline("", None, ncholder)
-    else: newbtn(ncholder, "NEW CATEGORY", lambda: start("new_cat", ""), F3).pack(fill="x", padx=8)  # styled like a category name
+    else: addbtn(ncholder, lambda: start("new_cat", ""), text="NEW CATEGORY").pack(fill="x", padx=8)
 
 def build_main():
     global flash, rows, shown_sel
@@ -443,12 +452,7 @@ def build_main():
             bgc = tk.Label(rows, image=icon("check", mix(BG, DIM, .16), S=110, gap=0), bg=BG, bd=0)
             bgc.place(relx=.5, rely=.45, anchor="center"); bgc.lower()
         if editing == ("new_task", sel): inline("", None, rows)
-        else:  # small round "+" under the tasks, its plus centered where the task circles are
-            b = tk.Frame(rows, cursor="hand2"); b.pack(anchor="w", padx=6, pady=(2, 0))
-            p = tk.Label(b, image=icon("plus", DIM, gap=0)); p.pack(padx=6, pady=5)  # (image labels ignore their own padx)
-            rounded(b, BG, BG); hover_bg(b, HOV_MAIN, BG)
-            p.bind("<Enter>", lambda e: p.config(image=icon("plus", ACC, gap=0)), add="+"); p.bind("<Leave>", lambda e: p.config(image=icon("plus", DIM, gap=0)), add="+")
-            for w in (b, p): w.bind("<Button-1>", lambda e: root.after_idle(start, "new_task", sel))
+        else: addbtn(rows, lambda: start("new_task", sel), BG, HOV_MAIN).pack(anchor="w", padx=6, pady=(2, 0))  # under the checkboxes
     else:
         fit(title, "Add a list in the sidebar  ←")
     swap(old, rows)
